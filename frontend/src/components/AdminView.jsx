@@ -88,10 +88,147 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
       setTableQrs(qrs);
     };
 
-    if (activeTab === 'settings') {
+    if (activeTab === 'settings' || activeTab === 'tables') {
       generateTableQrs();
     }
-  }, [activeTab]);
+  }, [activeTab, tables]);
+
+  // Fetch SlipOK quota and check logs in real-time
+  const fetchSlipokQuota = async () => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const res = await fetch(`${apiUrl}/api/slipok-quota`);
+      const data = await res.json();
+      if (data.success) {
+        setSlipokQuota(data.quota);
+      }
+    } catch (err) {
+      console.error('Error fetching SlipOK quota:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'slipok') return;
+    
+    fetchSlipokQuota();
+    
+    if (isMock) {
+      const dummyLogs = [
+        { id: 'log1', order_id: 'ORD-1234', table_id: 'T1', amount: 150, status: 'success', message: 'ตรวจสอบสำเร็จ (จำลอง)', timestamp: new Date(Date.now() - 3600000).toISOString() },
+        { id: 'log2', order_id: 'ORD-5678', table_id: 'T2', amount: 90, status: 'failed', message: 'ไม่พบ QR Code ในรูปภาพสลิป', timestamp: new Date(Date.now() - 7200000).toISOString() }
+      ];
+      setSlipLogs(dummyLogs);
+    } else {
+      const unsubscribe = onSnapshot(collection(db, 'slip_logs'), (snapshot) => {
+        const list = [];
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          list.push({
+            id: doc.id,
+            ...data,
+            timestamp: data.timestamp?.toDate ? data.timestamp.toDate().toISOString() : data.timestamp
+          });
+        });
+        list.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setSlipLogs(list);
+      });
+      return unsubscribe;
+    }
+  }, [activeTab, isMock]);
+
+  // Table Management Handlers
+  const handleAddTable = async (e) => {
+    e.preventDefault();
+    if (!newTableName.trim()) return;
+    const tableId = newTableName.trim().toUpperCase();
+    
+    try {
+      if (isMock) {
+        const storedTables = JSON.parse(localStorage.getItem('mock_tables') || '[]');
+        if (storedTables.some(t => t.id === tableId)) {
+          alert('มีโต๊ะหมายเลขนี้อยู่แล้ว');
+          return;
+        }
+        storedTables.push({ id: tableId, table_number: tableId, status: 'idle' });
+        localStorage.setItem('mock_tables', JSON.stringify(storedTables));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('mock_state_change'));
+      } else {
+        const tableRef = doc(db, 'tables', tableId);
+        const docSnap = await getDoc(tableRef);
+        if (docSnap.exists()) {
+          alert('มีโต๊ะหมายเลขนี้อยู่แล้ว');
+          return;
+        }
+        await setDoc(tableRef, {
+          table_number: tableId,
+          status: 'idle',
+          created_at: new Date()
+        });
+      }
+      setNewTableName('');
+    } catch (err) {
+      console.error(err);
+      alert('ไม่สามารถเพิ่มโต๊ะได้');
+    }
+  };
+
+  const handleDeleteTable = async (tableId) => {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบโต๊ะ ${tableId}?`)) return;
+    try {
+      if (isMock) {
+        const storedTables = JSON.parse(localStorage.getItem('mock_tables') || '[]');
+        const updated = storedTables.filter(t => t.id !== tableId);
+        localStorage.setItem('mock_tables', JSON.stringify(updated));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('mock_state_change'));
+      } else {
+        await deleteDoc(doc(db, 'tables', tableId));
+      }
+    } catch (err) {
+      console.error(err);
+      alert('ไม่สามารถลบโต๊ะได้');
+    }
+  };
+
+  const handleClearTableHistory = async (tableId) => {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการล้างประวัติคำสั่งซื้อทั้งหมดของโต๊ะ ${tableId}? ออเดอร์ของโต๊ะนี้จะถูกล้างประวัติจากฝั่งลูกค้า แต่ยังบันทึกอยู่ในยอดรายงานขาย`)) return;
+    
+    setClearingTableId(tableId);
+    try {
+      if (isMock) {
+        const storedOrders = JSON.parse(localStorage.getItem('mock_orders') || '[]');
+        const updated = storedOrders.map(o => {
+          if (o.table_id === tableId) {
+            return { ...o, is_archived: true };
+          }
+          return o;
+        });
+        localStorage.setItem('mock_orders', JSON.stringify(updated));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('mock_state_change'));
+        alert(`ล้างประวัติโต๊ะ ${tableId} สำเร็จ`);
+      } else {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        const response = await fetch(`${apiUrl}/api/clear-table-history`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tableId })
+        });
+        const result = await response.json();
+        if (result.success) {
+          alert(`ล้างประวัติโต๊ะ ${tableId} สำเร็จ (เคลียร์ ${result.clearedCount || 0} รายการ)`);
+        } else {
+          throw new Error(result.message || 'ล้มเหลว');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      alert(`เกิดข้อผิดพลาดในการล้างประวัติ: ${err.message}`);
+    } finally {
+      setClearingTableId(null);
+    }
+  };
 
   // Load Settings
   useEffect(() => {
