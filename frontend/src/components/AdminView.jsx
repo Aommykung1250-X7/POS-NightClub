@@ -535,10 +535,10 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
   return (
     <div className="admin-container">
       {/* Header */}
-      <header className="admin-header flex-between mb-4">
+      <header className="admin-header flex-between mb-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '16px', marginBottom: '24px' }}>
         <div>
-          <h1 className="header-title" style={{ fontSize: '28px' }}>แผงจัดการร้าน Chill POS ⚙️</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>ระบบจัดการออเดอร์สด คลังสินค้า และรายงานทางบัญชี</p>
+          <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: '600', letterSpacing: '1px', textTransform: 'uppercase' }}>CHILL BAR & BISTRO • STAFF PANEL</span>
+          <h1 className="header-title" style={{ fontSize: '32px', marginTop: '4px' }}>แผงจัดการร้าน Chill POS ⚙️</h1>
         </div>
         
         <div className="flex-align-center" style={{ gap: '12px' }}>
@@ -641,8 +641,9 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
               
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
                 {groupedActiveTables.map(tbl => (
-                  <div key={tbl.table_id} className="glass-panel pulse-card" style={{ padding: '20px', borderLeft: '4px solid var(--secondary)' }}>
-                    <div className="flex-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px', marginBottom: '12px' }}>
+                  <div key={tbl.table_id} className="glass-panel pulse-card" style={{ padding: '20px', borderTop: '4px solid var(--primary)', borderRadius: '16px', position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ position: 'absolute', top: 0, right: 0, width: '80px', height: '80px', background: 'radial-gradient(circle, rgba(37, 99, 235, 0.12) 0%, transparent 70%)', pointerEvents: 'none' }} />
+                    <div className="flex-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '10px', marginBottom: '12px', position: 'relative', zIndex: 1 }}>
                       <h3 style={{ fontSize: '22px', fontWeight: 'bold' }}>โต๊ะ: {tbl.table_id}</h3>
                       <span className="badge badge-pending" style={{ fontSize: '11px' }}>
                         สั่งแยกกัน {tbl.orders.length} บิล
@@ -765,7 +766,7 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
                   
                   {/* Quick Toggle switch for 1-click product availability */}
                   <div className="flex-align-center" style={{ marginRight: '10px' }}>
-                    <span style={{ fontSize: '12px', color: prod.is_available ? 'var(--success)' : 'var(--text-muted)' }}>
+                    <span className={prod.is_available ? 'badge badge-paid' : 'badge badge-out-of-stock'} style={{ fontSize: '11px', padding: '3px 8px' }}>
                       {prod.is_available ? 'เปิดขาย' : 'ปิดเมนู'}
                     </span>
                     <label className="switch">
@@ -792,8 +793,8 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
           </div>
 
           {/* CRUD Form */}
-          <div className="glass-panel" style={{ padding: '20px', height: 'fit-content' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="glass-panel" style={{ padding: '24px', height: 'fit-content', borderTop: '4px solid var(--accent)' }}>
+            <h2 className="header-title" style={{ fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Plus size={20} style={{ color: 'var(--primary)' }} /> {isEditing ? 'แก้ไขข้อมูลสินค้า' : 'เพิ่มสินค้าใหม่'}
             </h2>
             <form onSubmit={handleProductSubmit} style={{ display: 'flex', flexFlow: 'column', gap: '12px' }}>
@@ -1048,8 +1049,8 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
       {activeTab === 'tables' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* Add Table form */}
-          <div className="glass-panel" style={{ padding: '24px', maxWidth: '500px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="glass-panel" style={{ padding: '24px', maxWidth: '500px', borderTop: '4px solid var(--accent)' }}>
+            <h3 className="header-title" style={{ fontSize: '20px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Plus size={20} style={{ color: 'var(--primary)' }} /> เพิ่มโต๊ะอาหารใหม่
             </h3>
             <form onSubmit={handleAddTable} style={{ display: 'flex', gap: '10px' }}>
@@ -1069,8 +1070,9 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
           </div>
 
           {/* Table List with QR Codes & History deletion option */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="glass-panel" style={{ padding: '24px', borderTop: '4px solid var(--primary)', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle, rgba(37, 99, 235, 0.1) 0%, transparent 70%)', pointerEvents: 'none' }} />
+            <h3 className="header-title" style={{ fontSize: '20px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px', position: 'relative', zIndex: 1 }}>
               <QrCode size={20} style={{ color: 'var(--primary)' }} /> รายการโต๊ะและรหัส QR Code ประจำโต๊ะ
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
@@ -1132,9 +1134,9 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
       {activeTab === 'slipok' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* Quota overview */}
-          <div className="glass-panel" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="glass-panel" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '4px solid var(--accent)' }}>
             <div>
-              <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '4px' }}>ยอดโควตา SlipOK คงเหลือ</h3>
+              <h3 className="header-title" style={{ fontSize: '18px', marginBottom: '4px' }}>ยอดโควตา SlipOK คงเหลือ</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>สิทธิ์คงเหลือในการตรวจสอบความถูกต้องของสลิปโอนเงินจริงกับธนาคาร</p>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -1146,8 +1148,8 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
           </div>
 
           {/* Verification Logs list */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>ประวัติการสแกนตรวจสอบสลิป</h3>
+          <div className="glass-panel" style={{ padding: '24px', borderTop: '4px solid var(--primary)' }}>
+            <h3 className="header-title" style={{ fontSize: '20px', marginBottom: '16px' }}>ประวัติการสแกนตรวจสอบสลิป</h3>
             
             <div className="table-responsive">
               <table className="order-items-table">
