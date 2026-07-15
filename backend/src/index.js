@@ -163,10 +163,8 @@ app.post('/api/verify-slip', upload.single('slip'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'ใบสั่งซื้อนี้ชำระเงินเรียบร้อยแล้ว' });
     }
 
-    // 2. Verify the slip QR code and check for duplicates (Option C)
-    const hasSlipOkCreds = !!(process.env.SLIPOK_API_KEY && process.env.SLIPOK_BRANCH_ID);
+    // 2. Verify the slip QR code using SlipOK API
     const verifyResult = await verifySlip(req.file.buffer, {
-      useSlipOK: hasSlipOkCreds || process.env.USE_SLIPOK === 'true',
       slipOkApiKey: process.env.SLIPOK_API_KEY || '',
       slipOkBranchId: process.env.SLIPOK_BRANCH_ID || ''
     }, db);

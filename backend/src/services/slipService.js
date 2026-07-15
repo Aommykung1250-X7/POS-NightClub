@@ -116,64 +116,22 @@ export async function scanQrCodeFromBuffer(buffer) {
  * @param {admin.firestore.Firestore} db - Firestore instance to check for duplicate transactions
  */
 export async function verifySlip(imageBuffer, options = {}, db = null) {
-  const { useSlipOK = false, slipOkApiKey = '', slipOkBranchId = '' } = options;
+  const { slipOkApiKey = '', slipOkBranchId = '' } = options;
 
-  if (useSlipOK) {
-    return await verifyWithSlipOK(imageBuffer, slipOkApiKey, slipOkBranchId);
-  }
+  // 1. Force verification via SlipOK API
+  const verifyResult = await verifyWithSlipOK(imageBuffer, slipOkApiKey, slipOkBranchId);
 
-  // --- Option C: Local EMVCo Decoding ---
-  let qrText;
-  let slipInfo;
-  let isMockFallback = false;
-
-  try {
-    qrText = await scanQrCodeFromBuffer(imageBuffer);
-    slipInfo = extractSlipInfo(qrText);
-
-    if (!slipInfo.isValidSlip) {
-      throw new Error('ข้อมูลสลิปไม่ถูกต้องตามมาตรฐานธนาคาร');
-    }
-
-    if (!slipInfo.transactionId) {
-      throw new Error('ไม่สามารถอ่านรหัสธุรกรรม (Transaction ID) จากสลิปได้');
-    }
-  } catch (err) {
-    // If scanning/parsing fails in development, fallback to hashing the image buffer.
-    // This allows testing with cropped/blurry real slips, while still preventing duplicate usage via hash matching!
-    console.warn(`⚠️ QR Code Scan failed (${err.message}). Falling back to file-hash verification for demo.`);
-    
-    const hash = crypto.createHash('md5').update(imageBuffer).digest('hex').toUpperCase();
-    slipInfo = {
-      transactionId: `SLIP-HASH-${hash.substring(0, 12)}`,
-      bankCode: 'FALLBACK_MOCK',
-      isValidSlip: true
-    };
-    qrText = `MOCK_QR_FALLBACK_${hash}`;
-    isMockFallback = true;
-  }
-
-  // Check for slip reuse in database if Firestore is available
-  if (db) {
+  // 2. Check for slip reuse in database (Duplicate check)
+  if (db && verifyResult.transactionId) {
     const paymentsRef = db.collection('payments');
-    const duplicateQuery = await paymentsRef.where('transaction_id', '==', slipInfo.transactionId).get();
+    const duplicateQuery = await paymentsRef.where('transaction_id', '==', verifyResult.transactionId).get();
     
     if (!duplicateQuery.empty) {
       throw new Error('สลิปนี้ถูกใช้งานเพื่อยืนยันออเดอร์ในระบบไปแล้ว ไม่สามารถใช้งานซ้ำได้');
     }
   }
 
-  return {
-    success: true,
-    transactionId: slipInfo.transactionId,
-    bankCode: slipInfo.bankCode,
-    amount: null, // Local verification cannot fetch real bank balance check
-    message: isMockFallback 
-      ? 'ตรวจพบสลิปผ่านระบบจำลอง Hash สำเร็จ (ไม่พบคิวอาร์โค้ดภาพสลิป)' 
-      : 'ตรวจสอบรูปแบบสลิปและรหัสธุรกรรมเบื้องต้นสำเร็จ (ไม่มีการใช้ซ้ำ)',
-    qrText,
-    isMockFallback
-  };
+  return verifyResult;
 }
 
 /**
@@ -181,10 +139,10 @@ export async function verifySlip(imageBuffer, options = {}, db = null) {
  */
 async function verifyWithSlipOK(imageBuffer, apiKey, branchId) {
   if (!apiKey) {
-    throw new Error('ไม่พบ API Key ของ SlipOK');
+    throw new Error('ไม่พบ API Key ของ SlipOK (กรุณาตั้งค่าในไฟล์หลังบ้าน)');
   }
   if (!branchId) {
-    throw new Error('ไม่พบ Branch ID (รหัสสาขา) ของ SlipOK');
+    throw new Error('ไม่พบ Branch ID (รหัสสาขา) ของ SlipOK (กรุณาตั้งค่าในไฟล์หลังบ้าน)');
   }
 
   // 1. Try scanning QR code locally first to save bandwidth and speed up request
@@ -227,9 +185,16 @@ async function verifyWithSlipOK(imageBuffer, apiKey, branchId) {
       });
     }
 
-    const result = await response.json();
+    let result;
+    try {
+      result = await response.json();
+    } catch (parseErr) {
+      const text = await response.text();
+      throw new Error(`เซิร์ฟเวอร์ SlipOK ตอบกลับไม่ใช่ JSON (HTTP ${response.status}): ${text}`);
+    }
+
     if (!response.ok || !result.success) {
-      throw new Error(result.message || 'การตรวจสอบสลิปผ่าน SlipOK ล้มเหลว');
+      throw new Error(result.message || `การตรวจสอบสลิปล้มเหลว (รหัสข้อผิดพลาด: ${result.code || 'ไม่มี'})`);
     }
 
     return {
