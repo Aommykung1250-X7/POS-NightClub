@@ -43,8 +43,8 @@ app.get('/api/slipok-quota', async (req, res) => {
     const apiKey = process.env.SLIPOK_API_KEY;
     const branchId = process.env.SLIPOK_BRANCH_ID;
 
-    if (!apiKey || !branchId || process.env.USE_SLIPOK !== 'true') {
-      return res.json({ success: true, quota: 9999, overQuota: 0, isMock: true });
+    if (!apiKey || !branchId) {
+      return res.json({ success: true, quota: 0, overQuota: 0, isMock: true, message: 'กรุณาตั้งค่า SLIPOK_API_KEY และ SLIPOK_BRANCH_ID ใน Railway' });
     }
 
     const response = await fetch(`https://api.slipok.com/api/line/apikey/${branchId}/quota`, {
