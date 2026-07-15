@@ -93,46 +93,44 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
     }
   }, [activeTab, tables]);
 
-  // Fetch SlipOK quota and check logs in real-time
-  const fetchSlipokQuota = async () => {
+  // Fetch SlipOK quota and check logs in real-time from the backend
+  const fetchSlipokData = async () => {
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-      const res = await fetch(`${apiUrl}/api/slipok-quota`);
-      const data = await res.json();
-      if (data.success) {
-        setSlipokQuota(data.quota);
+      
+      // Fetch Quota
+      const quotaRes = await fetch(`${apiUrl}/api/slipok-quota`);
+      const quotaData = await quotaRes.json();
+      if (quotaData.success) {
+        setSlipokQuota(quotaData.quota);
+      }
+
+      // Fetch Logs
+      const logsRes = await fetch(`${apiUrl}/api/slip-logs`);
+      const logsData = await logsRes.json();
+      if (logsData.success) {
+        setSlipLogs(logsData.logs);
       }
     } catch (err) {
-      console.error('Error fetching SlipOK quota:', err);
+      console.error('Error fetching SlipOK data:', err);
     }
   };
 
   useEffect(() => {
     if (activeTab !== 'slipok') return;
     
-    fetchSlipokQuota();
-    
     if (isMock) {
+      setSlipokQuota(480);
       const dummyLogs = [
         { id: 'log1', order_id: 'ORD-1234', table_id: 'T1', amount: 150, status: 'success', message: 'ตรวจสอบสำเร็จ (จำลอง)', timestamp: new Date(Date.now() - 3600000).toISOString() },
         { id: 'log2', order_id: 'ORD-5678', table_id: 'T2', amount: 90, status: 'failed', message: 'ไม่พบ QR Code ในรูปภาพสลิป', timestamp: new Date(Date.now() - 7200000).toISOString() }
       ];
       setSlipLogs(dummyLogs);
     } else {
-      const unsubscribe = onSnapshot(collection(db, 'slip_logs'), (snapshot) => {
-        const list = [];
-        snapshot.forEach(doc => {
-          const data = doc.data();
-          list.push({
-            id: doc.id,
-            ...data,
-            timestamp: data.timestamp?.toDate ? data.timestamp.toDate().toISOString() : data.timestamp
-          });
-        });
-        list.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        setSlipLogs(list);
-      });
-      return unsubscribe;
+      fetchSlipokData();
+      
+      const interval = setInterval(fetchSlipokData, 5000); // Poll every 5 seconds
+      return () => clearInterval(interval);
     }
   }, [activeTab, isMock]);
 

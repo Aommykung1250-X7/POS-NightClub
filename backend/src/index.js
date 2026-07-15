@@ -72,6 +72,39 @@ app.get('/api/slipok-quota', async (req, res) => {
 });
 
 /**
+ * GET /api/slip-logs
+ * Fetch all slip check logs from Firestore.
+ */
+app.get('/api/slip-logs', async (req, res) => {
+  try {
+    if (!db) {
+      return res.json({ success: true, logs: [] });
+    }
+
+    const snapshot = await db.collection('slip_logs')
+      .orderBy('timestamp', 'desc')
+      .limit(100)
+      .get();
+
+    const logs = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      logs.push({
+        id: doc.id,
+        ...data,
+        timestamp: data.timestamp?.toDate ? data.timestamp.toDate().toISOString() : data.timestamp
+      });
+    });
+
+    res.json({ success: true, logs });
+  } catch (error) {
+    console.error('Error fetching slip logs:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+/**
  * POST /api/clear-table-history
  * Soft deletes all orders under a specific table by setting is_archived = true.
  */
