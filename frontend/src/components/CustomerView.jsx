@@ -18,7 +18,8 @@ import {
   CheckCircle, 
   X, 
   CreditCard,
-  QrCode 
+  QrCode,
+  Clock
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { generatePromptPayPayload } from '../utils/promptpay';
@@ -28,6 +29,7 @@ export default function CustomerView({ dbState, currentTable, setCurrentTable, i
   const [cart, setCart] = useState([]);
   const [activeCategory, setActiveCategory] = useState('ทั้งหมด');
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [checkoutOrder, setCheckoutOrder] = useState(null);
   const [qrCodeUrl, setQrCodeUrl] = useState('');
@@ -35,6 +37,7 @@ export default function CustomerView({ dbState, currentTable, setCurrentTable, i
   const [verifying, setVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [tableOrders, setTableOrders] = useState([]);
   const [shopSettings, setShopSettings] = useState({
     promptpay_id: '0891234567',
     qr_mode: 'dynamic', // 'dynamic' or 'static'
@@ -59,6 +62,45 @@ export default function CustomerView({ dbState, currentTable, setCurrentTable, i
       return unsub;
     }
   }, [isMock]);
+
+  // Subscribe to all active orders of this table (for history)
+  useEffect(() => {
+    if (!currentTable) return;
+    
+    if (isMock) {
+      const loadMockOrders = () => {
+        const storedOrders = JSON.parse(localStorage.getItem('mock_orders') || '[]');
+        const filtered = storedOrders.filter(o => o.table_id === currentTable && o.is_archived !== true);
+        setTableOrders(filtered);
+      };
+      
+      loadMockOrders();
+      window.addEventListener('storage', loadMockOrders);
+      window.addEventListener('mock_state_change', loadMockOrders);
+      return () => {
+        window.removeEventListener('storage', loadMockOrders);
+        window.removeEventListener('mock_state_change', loadMockOrders);
+      };
+    } else {
+      const ordersRef = collection(db, 'orders');
+      const unsubscribe = onSnapshot(ordersRef, (snapshot) => {
+        const list = [];
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.table_id === currentTable && data.is_archived !== true) {
+            list.push({ id: doc.id, ...data });
+          }
+        });
+        list.sort((a, b) => {
+          const timeA = a.created_at?.seconds || new Date(a.created_at).getTime() || 0;
+          const timeB = b.created_at?.seconds || new Date(b.created_at).getTime() || 0;
+          return timeB - timeA;
+        });
+        setTableOrders(list);
+      });
+      return () => unsubscribe();
+    }
+  }, [currentTable, isMock]);
 
   // Sync order status in real-time when checkout is open
   useEffect(() => {
@@ -219,6 +261,7 @@ export default function CustomerView({ dbState, currentTable, setCurrentTable, i
         
         // Notify other windows/tabs
         window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('mock_state_change'));
 
         setCheckoutOrder(newOrder);
         setIsCheckoutOpen(true);
@@ -355,6 +398,7 @@ export default function CustomerView({ dbState, currentTable, setCurrentTable, i
         localStorage.setItem('mock_payments', JSON.stringify(storedPayments));
 
         window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('mock_state_change'));
         setPaymentSuccess(true);
         setCart([]);
       } else {
@@ -460,19 +504,35 @@ export default function CustomerView({ dbState, currentTable, setCurrentTable, i
           <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: '600' }}>CHILL BAR & BISTRO</span>
           <h2 style={{ fontSize: '18px', fontWeight: 'bold' }}>โต๊ะ: {currentTable}</h2>
         </div>
-        <button 
-          onClick={() => setIsCartOpen(true)} 
-          className="btn-secondary" 
-          style={{ padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}
-        >
-          <ShoppingBag size={18} />
-          <span>ตะกร้า</span>
-          {totalCartItems > 0 && (
-            <span style={{ position: 'absolute', top: '-6px', right: '-6px', background: 'var(--secondary)', color: 'white', fontSize: '11px', width: '20px', height: '20px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-              {totalCartItems}
-            </span>
-          )}
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            onClick={() => setIsHistoryOpen(true)} 
+            className="btn-secondary" 
+            style={{ padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(255,255,255,0.05)' }}
+          >
+            <Clock size={16} />
+            <span>ประวัติ</span>
+            {tableOrders.length > 0 && (
+              <span style={{ background: 'var(--primary)', color: 'white', fontSize: '10px', padding: '1px 6px', borderRadius: '10px', fontWeight: 'bold' }}>
+                {tableOrders.length}
+              </span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setIsCartOpen(true)} 
+            className="btn-secondary" 
+            style={{ padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}
+          >
+            <ShoppingBag size={18} />
+            <span>ตะกร้า</span>
+            {totalCartItems > 0 && (
+              <span style={{ position: 'absolute', top: '-6px', right: '-6px', background: 'var(--secondary)', color: 'white', fontSize: '11px', width: '20px', height: '20px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                {totalCartItems}
+              </span>
+            )}
+          </button>
+        </div>
       </header>
 
       {/* Main Content Area */}
@@ -630,7 +690,68 @@ export default function CustomerView({ dbState, currentTable, setCurrentTable, i
           </div>
         </div>
       )}
+      {/* Order History Drawer Modal */}
+      {isHistoryOpen && (
+        <div className="overlay" onClick={() => setIsHistoryOpen(false)}>
+          <div className="modal-content glass-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="flex-between" style={{ marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clock size={20} /> ประวัติการสั่งซื้อของโต๊ะ {currentTable}
+              </h3>
+              <button onClick={() => setIsHistoryOpen(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
 
+            {tableOrders.length === 0 ? (
+              <div className="text-center" style={{ padding: '40px 0' }}>
+                <Clock size={40} style={{ color: 'var(--text-muted)', opacity: 0.5, marginBottom: '10px' }} />
+                <p style={{ color: 'var(--text-muted)' }}>ยังไม่มีประวัติการสั่งซื้อสำหรับรอบนี้</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '60vh', overflowY: 'auto', paddingRight: '4px' }}>
+                {tableOrders.map(order => (
+                  <div key={order.id} style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <div className="flex-between" style={{ marginBottom: '8px', borderBottom: '1px dashed rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ออเดอร์: {order.id}</span>
+                      <span style={{ 
+                        fontSize: '11px', 
+                        padding: '2px 8px', 
+                        borderRadius: '12px', 
+                        fontWeight: 'bold',
+                        background: order.status === 'paid' 
+                          ? 'rgba(16, 185, 129, 0.15)' 
+                          : order.status === 'served'
+                          ? 'rgba(59, 130, 246, 0.15)'
+                          : 'rgba(245, 158, 11, 0.15)',
+                        color: order.status === 'paid' 
+                          ? '#10b981' 
+                          : order.status === 'served'
+                          ? '#3b82f6'
+                          : '#f59e0b'
+                      }}>
+                        {order.status === 'paid' ? 'ชำระเงินแล้ว' : order.status === 'served' ? 'เสิร์ฟแล้ว' : 'กำลังรอตรวจสอบ'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+                      {order.items?.map((item, idx) => (
+                        <div key={idx} className="flex-between" style={{ fontSize: '13px' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>• {item.name} x{item.quantity}</span>
+                          <span>฿{(item.price * item.quantity).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex-between" style={{ fontSize: '13px', fontWeight: 'bold', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.03)' }}>
+                      <span>ยอดรวม</span>
+                      <span style={{ color: 'var(--secondary)' }}>฿{order.total_price?.toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Checkout QR Code / Slip Upload Modal */}
       {isCheckoutOpen && checkoutOrder && (
         <div className="overlay">

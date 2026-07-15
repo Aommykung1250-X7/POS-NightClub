@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 
 // Default config placeholder.
 // The user can replace this with their actual Firebase config.
@@ -16,6 +17,7 @@ const firebaseConfig = {
 let app = null;
 let db = null;
 let auth = null;
+let storage = null;
 let isMock = false;
 
 // Determine if we should run in Mock Mode (either placeholder keys or initialization fail)
@@ -39,6 +41,7 @@ try {
     app = initializeApp(config);
     db = getFirestore(app);
     auth = getAuth(app);
+    storage = getStorage(app);
     console.log('🔥 Firebase initialized successfully!');
   }
 } catch (error) {
@@ -46,5 +49,5 @@ try {
   isMock = true;
 }
 
-export { db, auth, isMock };
+export { db, auth, storage, isMock };
 export default db;

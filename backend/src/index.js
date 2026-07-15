@@ -35,6 +35,91 @@ app.get('/api/health', (req, res) => {
 });
 
 /**
+ * GET /api/slipok-quota
+ * Checks the remaining SlipOK verification quota.
+ */
+app.get('/api/slipok-quota', async (req, res) => {
+  try {
+    const apiKey = process.env.SLIPOK_API_KEY;
+    const branchId = process.env.SLIPOK_BRANCH_ID;
+
+    if (!apiKey || !branchId || process.env.USE_SLIPOK !== 'true') {
+      return res.json({ success: true, quota: 9999, overQuota: 0, isMock: true });
+    }
+
+    const response = await fetch(`https://api.slipok.com/api/line/apikey/${branchId}/quota`, {
+      method: 'GET',
+      headers: {
+        'x-authorization': apiKey
+      }
+    });
+
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || 'Failed to fetch quota from SlipOK');
+    }
+
+    res.json({ 
+      success: true, 
+      quota: result.data.quota, 
+      overQuota: result.data.overQuota || 0,
+      isMock: false 
+    });
+  } catch (error) {
+    console.error('Error fetching SlipOK quota:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * POST /api/clear-table-history
+ * Soft deletes all orders under a specific table by setting is_archived = true.
+ */
+app.post('/api/clear-table-history', async (req, res) => {
+  try {
+    const { tableId } = req.body;
+    if (!tableId) {
+      return res.status(400).json({ success: false, message: 'กรุณาระบุหมายเลขโต๊ะ (Table ID)' });
+    }
+
+    if (!db) {
+      return res.json({ success: true, message: `[Mock Mode] ล้างประวัติโต๊ะ ${tableId} สำเร็จ` });
+    }
+
+    const batch = db.batch();
+    let count = 0;
+    
+    const allTableOrders = await db.collection('orders')
+      .where('table_id', '==', tableId)
+      .get();
+
+    allTableOrders.forEach(doc => {
+      const data = doc.data();
+      if (!data.is_archived) {
+        batch.update(doc.ref, { 
+          is_archived: true,
+          updated_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    res.json({ 
+      success: true, 
+      message: `ล้างประวัติคำสั่งซื้อของโต๊ะ ${tableId} เรียบร้อยแล้ว (${count} ออเดอร์)`,
+      clearedCount: count
+    });
+  } catch (error) {
+    console.error('Error clearing table history:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
  * POST /api/verify-slip
  * Verifies the bank slip image, checks for duplicates, checks inventory,
  * deducts stock, and marks order as paid in real-time.
@@ -159,6 +244,21 @@ app.post('/api/verify-slip', upload.single('slip'), async (req, res) => {
       };
     });
 
+    // Write success log to slip_logs
+    try {
+      await db.collection('slip_logs').add({
+        order_id: orderId,
+        table_id: orderData.table_id || 'UNKNOWN',
+        amount: orderData.total_price || 0,
+        status: 'success',
+        message: verifyResult.message || 'ตรวจสอบสำเร็จ',
+        transaction_id: verifyResult.transactionId || '',
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (logErr) {
+      console.error('Failed to write success slip log:', logErr);
+    }
+
     res.json({
       success: true,
       message: 'ตรวจสอบสลิปและชำระเงินออเดอร์เรียบร้อยแล้ว!',
@@ -167,6 +267,34 @@ app.post('/api/verify-slip', upload.single('slip'), async (req, res) => {
 
   } catch (error) {
     console.error('Error verifying slip:', error);
+    
+    // Write failed log to slip_logs
+    if (db && orderId) {
+      try {
+        let tId = 'UNKNOWN';
+        let amt = 0;
+        try {
+          const oDoc = await db.collection('orders').doc(orderId).get();
+          if (oDoc.exists) {
+            tId = oDoc.data().table_id || 'UNKNOWN';
+            amt = oDoc.data().total_price || 0;
+          }
+        } catch (_) {}
+
+        await db.collection('slip_logs').add({
+          order_id: orderId,
+          table_id: tId,
+          amount: amt,
+          status: 'failed',
+          message: error.message || 'เกิดข้อผิดพลาดในการตรวจสอบสลิปโอนเงิน',
+          transaction_id: '',
+          timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (logErr) {
+        console.error('Failed to write failure slip log:', logErr);
+      }
+    }
+
     res.status(500).json({
       success: false,
       message: error.message || 'เกิดข้อผิดพลาดในการตรวจสอบสลิปโอนเงิน'

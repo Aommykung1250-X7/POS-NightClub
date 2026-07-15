@@ -7,7 +7,8 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
-  addDoc
+  addDoc,
+  onSnapshot
 } from 'firebase/firestore';
 import { 
   Bell, 
@@ -26,8 +27,8 @@ import {
 import QRCode from 'qrcode';
 
 export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
-  const { products, orders } = dbState;
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'inventory' | 'reports' | 'settings'
+  const { products, orders, tables } = dbState;
+  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'inventory' | 'tables' | 'slipok' | 'reports' | 'settings'
   
   // Settings State
   const [shopSettings, setShopSettings] = useState({
@@ -48,6 +49,18 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
     image_url: ''
   });
 
+  // Image Upload Form States
+  const [imageFile, setImageFile] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Table Management States
+  const [newTableName, setNewTableName] = useState('');
+  const [clearingTableId, setClearingTableId] = useState(null);
+
+  // SlipOK states
+  const [slipokQuota, setSlipokQuota] = useState(null);
+  const [slipLogs, setSlipLogs] = useState([]);
+
   // Force check state
   const [forceCheckingId, setForceCheckingId] = useState(null);
   const [forceCheckResult, setForceCheckResult] = useState('');
@@ -61,15 +74,15 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
   useEffect(() => {
     const generateTableQrs = async () => {
       const qrs = {};
-      const tables = ['T1', 'T2', 'T3', 'T4', 'T5'];
+      const tableList = tables && tables.length > 0 ? tables.map(t => t.id) : ['T1', 'T2', 'T3', 'T4', 'T5'];
       const baseUrl = window.location.origin;
-      for (const tbl of tables) {
+      for (const tbl of tableList) {
         try {
           const url = `${baseUrl}/?table=${tbl}`;
           const dataUrl = await QRCode.toDataURL(url, { width: 250, margin: 2 });
           qrs[tbl] = dataUrl;
         } catch (err) {
-          console.error(`Failed to generate QR for table ${tbl}:`, err);
+          console.error(err);
         }
       }
       setTableQrs(qrs);
@@ -219,13 +232,36 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
   // Product Inventory CRUD Actions
   const handleProductSubmit = async (e) => {
     e.preventDefault();
+    
+    let finalImageUrl = prodForm.image_url || 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&q=80&w=200';
+    
+    if (!isMock && imageFile) {
+      setUploadingImage(true);
+      try {
+        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+        const { storage } = await import('../firebase');
+        
+        const fileExt = imageFile.name.split('.').pop() || 'jpg';
+        const fileRef = ref(storage, `products/${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`);
+        const snap = await uploadBytes(fileRef, imageFile);
+        finalImageUrl = await getDownloadURL(snap.ref);
+      } catch (err) {
+        console.error('Failed to upload product image:', err);
+        alert(`อัปโหลดรูปภาพไม่สำเร็จ: ${err.message}`);
+        setUploadingImage(false);
+        return;
+      } finally {
+        setUploadingImage(false);
+      }
+    }
+
     const newProd = {
       name: prodForm.name,
       price: parseFloat(prodForm.price),
       stock: parseInt(prodForm.stock),
       category: prodForm.category,
       is_available: prodForm.is_available,
-      image_url: prodForm.image_url || 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&q=80&w=200'
+      image_url: finalImageUrl
     };
 
     try {
@@ -253,8 +289,9 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
           await setDoc(doc(db, 'products', generatedId), newProd);
         }
       }
-      // Reset Form
-      setProdForm({ name: '', price: '', stock: '', category: 'เครื่องดื่มแอลกอฮอล์', is_available: true, image_url: '' });
+      // Reset Form and states
+      setProdForm({ name: '', price: '', stock: '', category: 'เครื่องดื่ม', is_available: true, image_url: '' });
+      setImageFile(null);
     } catch (err) {
       console.error(err);
       alert('ทำรายการข้อมูลสินค้าไม่สำเร็จ');
@@ -404,39 +441,53 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
       </header>
 
       {/* Tabs */}
-      <div className="admin-tabs">
+      <div className="admin-tabs" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
         <button 
           onClick={() => setActiveTab('orders')} 
           className={`admin-tab ${activeTab === 'orders' ? 'active' : ''}`}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
         >
           <Bell size={18} /> จอออเดอร์สด (Live Monitor)
           {orders.filter(o => o.status === 'paid').length > 0 && (
             <span style={{ background: 'var(--secondary)', color: 'white', fontSize: '11px', padding: '2px 6px', borderRadius: '10px', fontWeight: 'bold' }}>
-              {orders.filter(o => o.status === 'paid').length} ออเดอร์ใหม่
+              {orders.filter(o => o.status === 'paid').length}
             </span>
           )}
         </button>
         <button 
           onClick={() => setActiveTab('inventory')} 
           className={`admin-tab ${activeTab === 'inventory' ? 'active' : ''}`}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
         >
           <Package size={18} /> จัดการคลังสินค้า (CRUD)
         </button>
         <button 
+          onClick={() => setActiveTab('tables')} 
+          className={`admin-tab ${activeTab === 'tables' ? 'active' : ''}`}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
+        >
+          <QrCode size={18} /> จัดการโต๊ะ & QR
+        </button>
+        <button 
+          onClick={() => setActiveTab('slipok')} 
+          className={`admin-tab ${activeTab === 'slipok' ? 'active' : ''}`}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
+        >
+          <FileText size={18} /> ประวัติสลิป & โควตา
+        </button>
+        <button 
           onClick={() => setActiveTab('reports')} 
           className={`admin-tab ${activeTab === 'reports' ? 'active' : ''}`}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
         >
           <FileText size={18} /> รายงานยอดขายและภาษี
         </button>
         <button 
           onClick={() => setActiveTab('settings')} 
           className={`admin-tab ${activeTab === 'settings' ? 'active' : ''}`}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
         >
-          <Settings size={18} /> ตั้งค่าร้านค้า & QR Code
+          <Settings size={18} /> ตั้งค่า PromptPay
         </button>
       </div>
 
@@ -663,14 +714,35 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
               </div>
 
               <div>
-                <label style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>ลิงก์รูปภาพสินค้า (Image URL)</label>
+                <label style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>รูปภาพสินค้า (อัปโหลดไฟล์รูปภาพ)</label>
+                {prodForm.image_url && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <img src={prodForm.image_url} alt="Preview" style={{ width: '80px', height: '80px', borderRadius: '8px', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                )}
                 <input 
-                  type="text" 
-                  value={prodForm.image_url} 
-                  onChange={(e) => setProdForm({ ...prodForm, image_url: e.target.value })}
+                  type="file" 
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    
+                    if (isMock) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        setProdForm(prev => ({ ...prev, image_url: reader.result }));
+                      };
+                      reader.readAsDataURL(file);
+                    } else {
+                      setImageFile(file);
+                      const previewUrl = URL.createObjectURL(file);
+                      setProdForm(prev => ({ ...prev, image_url: previewUrl }));
+                    }
+                  }}
                   className="input-field" 
-                  placeholder="ใส่ลิงก์รูปภาพ เช่น https://..."
+                  style={{ background: 'none', border: '1px dashed var(--border)', padding: '6px', fontSize: '13px' }}
                 />
+                {uploadingImage && <p style={{ fontSize: '12px', color: 'var(--primary)', marginTop: '4px' }}>กำลังอัปโหลดรูปภาพ...</p>}
               </div>
 
               <div className="flex-align-center" style={{ margin: '8px 0' }}>
@@ -834,39 +906,154 @@ export default function AdminView({ dbState, isMock, currentUser, onLogout }) {
               </button>
             </form>
           </div>
+        </div>
+      )}
 
-          {/* Section: Table QR Codes for print */}
-          <div className="glass-panel" style={{ padding: '24px', border: '1px solid rgba(37, 99, 235, 0.3)' }}>
+      {/* TAB: Table Management & QR Codes */}
+      {activeTab === 'tables' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Add Table form */}
+          <div className="glass-panel" style={{ padding: '24px', maxWidth: '500px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Plus size={20} style={{ color: 'var(--primary)' }} /> เพิ่มโต๊ะอาหารใหม่
+            </h3>
+            <form onSubmit={handleAddTable} style={{ display: 'flex', gap: '10px' }}>
+              <input 
+                type="text" 
+                required
+                value={newTableName}
+                onChange={(e) => setNewTableName(e.target.value)}
+                className="input-field" 
+                placeholder="เช่น T6, โต๊ะ 6"
+                style={{ flex: 1 }}
+              />
+              <button type="submit" className="btn-primary" style={{ padding: '0 20px', whiteSpace: 'nowrap' }}>
+                เพิ่มโต๊ะ
+              </button>
+            </form>
+          </div>
+
+          {/* Table List with QR Codes & History deletion option */}
+          <div className="glass-panel" style={{ padding: '24px' }}>
             <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <QrCode size={20} style={{ color: 'var(--primary)' }} /> QR Code ประจำโต๊ะ
+              <QrCode size={20} style={{ color: 'var(--primary)' }} /> รายการโต๊ะและรหัส QR Code ประจำโต๊ะ
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-              พิมพ์และนำ QR Code เหล่านี้ไปติดไว้ที่โต๊ะแต่ละโต๊ะ เพื่อให้ลูกค้าระบุตัวตนสั่งอาหารและเครื่องดื่มเข้าสู่โต๊ะนั้นโดยอัตโนมัติ
+              สามารถดาวน์โหลด QR Code ไปพิมพ์ติดไว้ที่โต๊ะแต่ละโต๊ะ และกดล้างประวัติคำสั่งซื้อเมื่อลูกค้าเช็คบิลเสร็จสิ้น
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '16px' }}>
-              {['T1', 'T2', 'T3', 'T4', 'T5'].map(tbl => (
-                <div key={tbl} className="text-center" style={{ background: 'rgba(255,255,255,0.01)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.03)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <strong style={{ fontSize: '15px', marginBottom: '8px', color: 'var(--accent)' }}>โต๊ะ {tbl}</strong>
-                  <div style={{ background: 'white', padding: '6px', borderRadius: '8px', marginBottom: '12px', display: 'inline-block' }}>
-                    {tableQrs[tbl] ? (
-                      <img src={tableQrs[tbl]} alt={`QR โต๊ะ ${tbl}`} style={{ width: '100px', height: '100px', display: 'block' }} />
-                    ) : (
-                      <div style={{ width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '11px' }}>กำลังสร้าง...</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px' }}>
+              {(tables && tables.length > 0 ? tables : [{id: 'T1'}, {id: 'T2'}, {id: 'T3'}, {id: 'T4'}, {id: 'T5'}]).map(tblObj => {
+                const tbl = tblObj.id;
+                return (
+                  <div key={tbl} className="text-center" style={{ background: 'rgba(255,255,255,0.01)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.03)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div className="flex-between" style={{ width: '100%', marginBottom: '12px' }}>
+                      <strong style={{ fontSize: '16px', color: 'var(--accent)' }}>โต๊ะ {tbl}</strong>
+                      <button 
+                        onClick={() => handleDeleteTable(tbl)}
+                        style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
+                        title="ลบโต๊ะ"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+
+                    <div style={{ background: 'white', padding: '8px', borderRadius: '8px', marginBottom: '12px', display: 'inline-block' }}>
+                      {tableQrs[tbl] ? (
+                        <img src={tableQrs[tbl]} alt={`QR โต๊ะ ${tbl}`} style={{ width: '120px', height: '120px', display: 'block' }} />
+                      ) : (
+                        <div style={{ width: '120px', height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '11px' }}>กำลังสร้าง...</div>
+                      )}
+                    </div>
+
+                    {tableQrs[tbl] && (
+                      <a 
+                        href={tableQrs[tbl]} 
+                        download={`QR_Table_${tbl}.png`}
+                        className="btn-secondary"
+                        style={{ padding: '8px', fontSize: '12px', borderRadius: '8px', width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginBottom: '8px' }}
+                      >
+                        <Download size={12} /> ดาวน์โหลดภาพ QR
+                      </a>
                     )}
-                  </div>
-                  {tableQrs[tbl] && (
-                    <a 
-                      href={tableQrs[tbl]} 
-                      download={`QR_Table_${tbl}.png`}
+
+                    <button 
+                      onClick={() => handleClearTableHistory(tbl)}
+                      disabled={clearingTableId === tbl}
                       className="btn-secondary"
-                      style={{ padding: '6px', fontSize: '11px', borderRadius: '6px', width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                      style={{ padding: '8px', fontSize: '12px', borderRadius: '8px', width: '100%', borderColor: 'rgba(239, 68, 68, 0.2)', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                     >
-                      <Download size={11} /> โหลดรูปภาพ
-                    </a>
+                      {clearingTableId === tbl ? 'กำลังเคลียร์...' : 'ล้างประวัติออเดอร์'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: SlipOK Log & Quota */}
+      {activeTab === 'slipok' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Quota overview */}
+          <div className="glass-panel" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '4px' }}>ยอดโควตา SlipOK คงเหลือ</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>สิทธิ์คงเหลือในการตรวจสอบความถูกต้องของสลิปโอนเงินจริงกับธนาคาร</p>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ fontSize: '28px', fontWeight: '800', color: 'var(--accent)' }}>
+                {slipokQuota !== null ? (typeof slipokQuota === 'number' ? slipokQuota.toLocaleString() : slipokQuota) : 'ดึงข้อมูล...'}
+              </span>
+              <span style={{ fontSize: '14px', color: 'var(--text-muted)', marginLeft: '4px' }}>ครั้ง</span>
+            </div>
+          </div>
+
+          {/* Verification Logs list */}
+          <div className="glass-panel" style={{ padding: '24px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>ประวัติการสแกนตรวจสอบสลิป</h3>
+            
+            <div className="table-responsive">
+              <table className="order-items-table">
+                <thead>
+                  <tr>
+                    <th>วัน-เวลา</th>
+                    <th>เลขออเดอร์</th>
+                    <th>โต๊ะ</th>
+                    <th>ยอดเงินในสลิป</th>
+                    <th>สถานะ</th>
+                    <th>รายละเอียดผลลัพธ์</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {slipLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlignment: 'center', padding: '40px 0', color: 'var(--text-muted)' }} className="text-center">
+                        ยังไม่มีบันทึกประวัติการสแกนสลิปในคอลเลกชันระบบ
+                      </td>
+                    </tr>
+                  ) : (
+                    slipLogs.map(log => (
+                      <tr key={log.id}>
+                        <td>{log.timestamp ? new Date(log.timestamp).toLocaleString('th-TH') : '-'}</td>
+                        <td><span style={{ fontFamily: 'monospace', color: 'var(--primary)' }}>{log.order_id}</span></td>
+                        <td><strong>โต๊ะ {log.table_id}</strong></td>
+                        <td><span style={{ fontWeight: 'bold' }}>{log.amount > 0 ? `฿${log.amount.toLocaleString()}` : '-'}</span></td>
+                        <td>
+                          <span className={log.status === 'success' ? 'badge badge-served' : 'badge badge-out-of-stock'}>
+                            {log.status === 'success' ? 'ผ่าน (Success)' : 'ล้มเหลว (Failed)'}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '13px', color: log.status === 'success' ? '#10b981' : '#f87171' }}>
+                          {log.message}
+                          {log.transaction_id && <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Ref: {log.transaction_id}</span>}
+                        </td>
+                      </tr>
+                    ))
                   )}
-                </div>
-              ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
